@@ -98,6 +98,8 @@ type thread struct {
 // be sent into the thread channel.
 type requestThread struct {
 	thread chan *thread
+	// dxg requests a process with a private file descriptor table.
+	dxg bool
 }
 
 // requestStub is used to request a new stub process.
@@ -258,7 +260,13 @@ func (s *subprocess) handlePtraceSyscallRequest(req any) {
 
 	switch r := req.(type) {
 	case requestThread:
-		t, err := ptraceThread.clone()
+		var t *thread
+		var err error
+		if r.dxg {
+			t, err = ptraceThread.cloneWithFlags(dxgCloneFlags)
+		} else {
+			t, err = ptraceThread.clone()
+		}
 		if err != nil {
 			handlePtraceSyscallRequestError(req, "error initializing thread: %v", err)
 			return
@@ -287,6 +295,25 @@ func (s *subprocess) handlePtraceSyscallRequest(req any) {
 		)
 		if err != nil {
 			handlePtraceSyscallRequestError(req, "prctl: %v", err)
+			return
+		}
+		if r.dxg {
+			// Hand the stopped process to its dedicated ptrace owner. Unlike
+			// sysmsg threads, it never runs application code.
+			id, ok := s.sysmsgStackPool.Get()
+			if !ok {
+				t.kill()
+				r.thread <- nil
+				return
+			}
+			t.sysmsgStackID = id
+			if err := unix.Tgkill(int(t.tgid), int(t.tid), unix.SIGSTOP); err != nil {
+				t.kill()
+				r.thread <- nil
+				return
+			}
+			t.detach()
+			r.thread <- t
 			return
 		}
 
@@ -498,6 +525,13 @@ func (s *subprocess) mapPrivateRegions() {
 //
 // This will panic on failure (which should never happen).
 func (s *subprocess) unmap() {
+	if dxgEnabled {
+		// Retain the PROT_NONE reservations around the stub as this MM is
+		// initialized/recycled. DXG's host-chosen mappings must stay below
+		// the application limit, not land in gaps among stub regions.
+		s.Unmap(0, uint64(maxStubUserAddress))
+		return
+	}
 	s.Unmap(0, uint64(stubStart))
 	if maximumUserAddress != stubEnd {
 		s.Unmap(hostarch.Addr(stubEnd), uint64(maximumUserAddress-stubEnd))

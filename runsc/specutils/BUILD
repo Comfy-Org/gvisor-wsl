@@ -9,6 +9,7 @@ go_library(
     name = "specutils",
     srcs = [
         "cri.go",
+        "dxg.go",
         "fs.go",
         "gofer_conf.go",
         "hooks.go",
@@ -43,6 +44,7 @@ go_test(
     size = "small",
     srcs = [
         "gofer_conf_test.go",
+        "dxg_test.go",
         "specutils_test.go",
     ],
     library = ":specutils",

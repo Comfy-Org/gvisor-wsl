@@ -35,6 +35,8 @@ go_library(
         "context_list.go",
         "context_queue.go",
         "context_queue_unsafe.go",
+        "dxg.go",
+        "dxg_unsafe.go",
         "filters.go",
         "filters_amd64.go",
         "filters_arm64.go",
@@ -75,6 +77,7 @@ go_library(
     ],
     visibility = ["//:sandbox"],
     deps = [
+        "//pkg/abi/dxg",
         "//pkg/abi/linux",
         "//pkg/atomicbitops",
         "//pkg/bpf",
@@ -113,11 +116,13 @@ go_test(
     size = "small",
     srcs = [
         "context_queue_test.go",
+        "dxg_test.go",
         "shared_context_test.go",
         "systrap_test.go",
     ],
     library = ":systrap",
     deps = [
+        "//pkg/abi/dxg",
         "//pkg/context",
         "//pkg/cpuid",
         "//pkg/hostarch",

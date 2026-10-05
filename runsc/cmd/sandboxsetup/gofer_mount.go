@@ -543,10 +543,12 @@ func SetupDev(spec *specs.Spec, conf *config.Config, root, procPath string) erro
 	nvproxyEnabled := specutils.NVProxyEnabled(spec, conf)
 	tpuproxyEnabled := specutils.TPUProxyEnabled(spec, conf)
 	rdmaproxyEnabled := specutils.RDMAEnabled(spec, conf)
+	dxgproxyEnabled := specutils.DXGEnabled(spec, conf)
 	for _, dev := range spec.Linux.Devices {
 		shouldMount := (nvproxyEnabled && ShouldExposeNvidiaDevice(dev.Path)) ||
 			(tpuproxyEnabled && ShouldExposeTpuDevice(dev.Path)) ||
-			(rdmaproxyEnabled && ShouldExposeRDMADevice(dev.Path))
+			(rdmaproxyEnabled && ShouldExposeRDMADevice(dev.Path)) ||
+			(dxgproxyEnabled && dev.Path == "/dev/dxg")
 		if !shouldMount {
 			continue
 		}

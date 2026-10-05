@@ -148,6 +148,24 @@ func attachedThread(flags uintptr, defaultAction seccomp.Action) (*thread, error
 			}),
 			Action: seccomp.Allow,
 		}
+		if dxgEnabled {
+			// Only trusted syscall helpers reach these rules. Application
+			// threads receive a second filter that traps these syscalls.
+			ruleSet.Rules.Add(unix.SYS_CLONE, seccomp.PerArg{seccomp.EqualTo(dxgCloneFlags)})
+			ruleSet.Rules.Add(unix.SYS_IOCTL, dxgIoctlRules())
+			ruleSet.Rules.Add(unix.SYS_OPENAT, seccomp.PerArg{
+				seccomp.NonNegativeFD{}, seccomp.AnyValue{},
+				seccomp.MaskedEqual(^uintptr(unix.O_ACCMODE), unix.O_NOFOLLOW|unix.O_CLOEXEC),
+				seccomp.EqualTo(0),
+			})
+			ruleSet.Rules.Add(unix.SYS_CLOSE, seccomp.PerArg{seccomp.NonNegativeFD{}})
+			ruleSet.Rules.Add(unix.SYS_SENDMSG, seccomp.PerArg{seccomp.NonNegativeFD{}, seccomp.AnyValue{}, seccomp.EqualTo(unix.MSG_DONTWAIT | unix.MSG_NOSIGNAL)})
+			ruleSet.Rules.Add(unix.SYS_RECVMSG, seccomp.PerArg{seccomp.NonNegativeFD{}, seccomp.AnyValue{}, seccomp.EqualTo(unix.MSG_DONTWAIT | unix.MSG_CMSG_CLOEXEC)})
+			ruleSet.Rules.Add(unix.SYS_FCNTL, seccomp.PerArg{seccomp.NonNegativeFD{}, seccomp.EqualTo(unix.F_GETFD)})
+			ruleSet.Rules.Add(unix.SYS_CLOSE_RANGE, seccomp.PerArg{
+				seccomp.AnyValue{}, seccomp.AnyValue{}, seccomp.EqualTo(0),
+			})
+		}
 		rules = append(rules, ruleSet)
 		rules = appendArchSeccompRules(rules)
 	}
@@ -216,6 +234,32 @@ func forkStub(flags uintptr, instrs []bpf.Instruction) (*thread, error) {
 			arch.SyscallArgument{Value: maximumUserAddress - stubROMapEnd})
 		if err != nil {
 			return nil, err
+		}
+		if dxgEnabled {
+			// DXG uses vm_mmap(NULL, ...) in this MM to choose fence
+			// addresses. Host ASLR can put them in the top-of-address-space
+			// region that systrap excludes from application memory. Reserve
+			// that region before initializing stacks/shared queues, preserving
+			// only the stub code/rules that the stopped thread is executing.
+			// Subsequent trusted MAP_FIXED mappings replace these guards.
+			for _, ar := range [][2]uintptr{
+				{maxStubUserAddress, stubStart},
+				{stubROMapEnd, maximumUserAddress},
+			} {
+				if ar[0] == ar[1] {
+					continue
+				}
+				_, err := t.syscallIgnoreInterrupt(&t.initRegs, unix.SYS_MMAP,
+					arch.SyscallArgument{Value: ar[0]},
+					arch.SyscallArgument{Value: ar[1] - ar[0]},
+					arch.SyscallArgument{Value: unix.PROT_NONE},
+					arch.SyscallArgument{Value: unix.MAP_PRIVATE | unix.MAP_ANONYMOUS | unix.MAP_FIXED | unix.MAP_NORESERVE},
+					arch.SyscallArgument{Value: ^uintptr(0)},
+					arch.SyscallArgument{Value: 0})
+				if err != nil {
+					return nil, err
+				}
+			}
 		}
 
 		return t, nil

@@ -12,3 +12,7 @@
 # clangd compilation database
 /.cache/clangd
 /compile_commands.json
+# Local WSL fork builds and disposable integration-test fixtures.
+/.build-cache/
+/.wsl-artifacts/
+/tools/wsl/__pycache__/

@@ -371,6 +371,10 @@ type Config struct {
 	// NVProxy enables support for Nvidia GPUs.
 	NVProxy bool `flag:"nvproxy"`
 
+	// DXGProxy enables the experimental WSL /dev/dxg compatibility proxy.
+	// It has not undergone a security review for hostile workloads.
+	DXGProxy DXGProxyMode `flag:"dxgproxy"`
+
 	// NVProxyDocker is deprecated. Please use nvidia-container-runtime or
 	// `docker run --gpus` directly. For backward compatibility, this has the
 	// effect of injecting nvidia-container-runtime-hook as a prestart hook.
@@ -508,6 +512,12 @@ func (c *Config) UseNetworkProxy() bool {
 // Config.Override does not validate, so callers must call Validate once they
 // are done overriding.
 func (c *Config) Validate() error {
+	if c.DXGProxy != DXGProxyDisabled && c.DXGProxy != DXGProxyExperimental {
+		return fmt.Errorf("invalid dxgproxy mode: %v", c.DXGProxy)
+	}
+	if c.DXGProxy == DXGProxyExperimental && (c.Platform != "systrap" || !c.DirectFS || c.NVProxy || c.NVProxyDocker) {
+		return fmt.Errorf("--dxgproxy=experimental requires --platform=systrap, --directfs=true and nvproxy disabled")
+	}
 	if c.Overlay && c.Overlay2.Enabled() {
 		// Deprecated flag was used together with flag that replaced it.
 		return fmt.Errorf("overlay flag has been replaced with overlay2 flag")
@@ -1476,6 +1486,46 @@ func (p SidecarReleasePolicy) String() string {
 // Applies returns whether the policy is in effect for this runsc build.
 func (p SidecarReleasePolicy) Applies() bool {
 	return p == SidecarReleaseAlways || (p == SidecarReleaseIfReleaseBuild && IsReleaseVersion(version.Version()))
+}
+
+// DXGProxyMode controls the experimental WSL GPU compatibility proxy.
+type DXGProxyMode int
+
+// DXG proxy modes. There is intentionally no security-supported enabled mode.
+const (
+	DXGProxyDisabled DXGProxyMode = iota
+	DXGProxyExperimental
+)
+
+// Set implements flag.Value.
+func (p *DXGProxyMode) Set(v string) error {
+	switch v {
+	case "disabled":
+		*p = DXGProxyDisabled
+	case "experimental":
+		*p = DXGProxyExperimental
+	default:
+		return fmt.Errorf("invalid dxgproxy mode %q; want disabled or experimental", v)
+	}
+	return nil
+}
+
+// Ptr returns a pointer to p for flag registration.
+func (p DXGProxyMode) Ptr() *DXGProxyMode { return &p }
+
+// Get implements flag.Getter.
+func (p *DXGProxyMode) Get() any { return *p }
+
+// String implements flag.Value.
+func (p DXGProxyMode) String() string {
+	switch p {
+	case DXGProxyDisabled:
+		return "disabled"
+	case DXGProxyExperimental:
+		return "experimental"
+	default:
+		return fmt.Sprintf("DXGProxyMode(%d)", int(p))
+	}
 }
 
 // SidecarUsagePolicy controls when to use sidecar binaries vs embedded fallbacks.

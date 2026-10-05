@@ -719,6 +719,9 @@ func (r *restorer) calculateWallTimeSavings(s *Savings) error {
 }
 
 func (l *Loader) save(o *control.SaveOpts) error {
+	if l.root.conf.DXGProxy == config.DXGProxyExperimental {
+		return fmt.Errorf("checkpoint is unsupported with --dxgproxy=experimental")
+	}
 	saveOpts, err := control.ConvertToStateSaveOpts(o)
 	if err != nil {
 		l.k.OnCheckpointAttempt(err)

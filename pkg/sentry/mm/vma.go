@@ -62,6 +62,9 @@ func (mm *MemoryManager) createVMALocked(ctx context.Context, opts memmap.MMapOp
 		}
 	}
 	ar, _ := addr.ToRange(opts.Length)
+	if opts.Unmap && mm.overlapsPlatformMappingLocked(ar) {
+		return vmaIterator{}, hostarch.AddrRange{}, droppedIDs, linuxerr.EBUSY
+	}
 
 	// Check against RLIMIT_AS.
 	newUsageAS := mm.usageAS + opts.Length

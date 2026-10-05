@@ -325,6 +325,10 @@ func (mm *MemoryManager) MUnmap(ctx context.Context, addr hostarch.Addr, length 
 	}
 
 	mm.mappingMu.Lock()
+	if mm.overlapsPlatformMappingLocked(ar) {
+		mm.mappingMu.Unlock()
+		return linuxerr.EBUSY
+	}
 	_, droppedIDs := mm.unmapLocked(ctx, ar, nil /* droppedIDs */)
 	mm.mappingMu.Unlock()
 
@@ -396,6 +400,11 @@ func (mm *MemoryManager) MRemap(ctx context.Context, oldAddr hostarch.Addr, oldS
 	mm.mappingMu.Lock()
 	defer mm.mappingMu.Unlock()
 
+	oldCheckAR, oldOK := oldAddr.ToRange(max(oldSize, uint64(hostarch.PageSize)))
+	newCheckAR, newOK := opts.NewAddr.ToRange(newSize)
+	if (oldOK && mm.overlapsPlatformMappingLocked(oldCheckAR)) || (opts.Move == MRemapMustMove && newOK && mm.overlapsPlatformMappingLocked(newCheckAR)) {
+		return 0, linuxerr.EBUSY
+	}
 	// All cases require that a vma exists at oldAddr.
 	vseg := mm.vmas.FindSegment(oldAddr)
 	if !vseg.Ok() {
@@ -657,6 +666,9 @@ func (mm *MemoryManager) MProtect(addr hostarch.Addr, length uint64, realPerms h
 
 	mm.mappingMu.Lock()
 	defer mm.mappingMu.Unlock()
+	if mm.overlapsPlatformMappingLocked(ar) {
+		return linuxerr.EBUSY
+	}
 	// Non-growsDown mprotect requires that all of ar is mapped, and stops at
 	// the first non-empty gap. growsDown mprotect requires that the first vma
 	// be growsDown, but does not require it to extend all the way to ar.Start;
@@ -1125,6 +1137,9 @@ func (mm *MemoryManager) Decommit(addr hostarch.Addr, length uint64) error {
 
 	mm.mappingMu.RLock()
 	defer mm.mappingMu.RUnlock()
+	if mm.overlapsPlatformMappingLocked(ar) {
+		return linuxerr.EBUSY
+	}
 	mm.activeMu.Lock()
 	defer mm.activeMu.Unlock()
 
@@ -1310,6 +1325,9 @@ func (mm *MemoryManager) madviseMutateVMAs(addr hostarch.Addr, length uint64, f 
 func (mm *MemoryManager) SetDontFork(addr hostarch.Addr, length uint64, dontfork bool) error {
 	addr = hostarch.UntaggedUserAddr(addr)
 	return mm.madviseMutateVMAs(addr, length, func(vseg vmaIterator) error {
+		if _, ok := vseg.ValuePtr().mappable.(*platformMapping); ok && !dontfork {
+			return linuxerr.EBUSY
+		}
 		vseg.ValuePtr().dontfork = dontfork
 		return nil
 	})

@@ -84,6 +84,10 @@ func (t *thread) getSignalInfo(si *linux.SignalInfo) error {
 //
 // Precondition: the OS thread must be locked and own t.
 func (t *thread) clone() (*thread, error) {
+	return t.cloneWithFlags(uintptr(unix.CLONE_FILES | unix.CLONE_FS | unix.CLONE_PTRACE | unix.CLONE_VM | linux.SIGKILL))
+}
+
+func (t *thread) cloneWithFlags(flags uintptr) (*thread, error) {
 	r, ok := hostarch.Addr(stackPointer(&t.initRegs)).RoundUp()
 	if !ok {
 		return nil, unix.EINVAL
@@ -94,12 +98,6 @@ func (t *thread) clone() (*thread, error) {
 	// in its queue. A sysmsg thread will not be traced by ptrace,
 	// so it will be stopped immediately if it will share signal
 	// queue with its stub process.
-	flags := uintptr(
-		unix.CLONE_FILES |
-			unix.CLONE_FS |
-			unix.CLONE_PTRACE |
-			unix.CLONE_VM |
-			linux.SIGKILL)
 	rval, err := t.syscallIgnoreInterrupt(
 		&t.initRegs,
 		unix.SYS_CLONE,

@@ -38,6 +38,7 @@ import (
 	"gvisor.dev/gvisor/pkg/log"
 	"gvisor.dev/gvisor/pkg/rdma"
 	"gvisor.dev/gvisor/pkg/sentry/checkpoint"
+	"gvisor.dev/gvisor/pkg/sentry/devices/dxgproxy"
 	"gvisor.dev/gvisor/pkg/sentry/devices/memdev"
 	"gvisor.dev/gvisor/pkg/sentry/devices/nvproxy"
 	"gvisor.dev/gvisor/pkg/sentry/devices/nvproxy/nvconf"
@@ -198,6 +199,16 @@ func registerFilesystems(k *kernel.Kernel, info *containerInfo, rdmaSnapshot *rd
 
 	if err := nvproxyRegisterDevices(info, vfsObj, k.NvidiaDriverVersion); err != nil {
 		return err
+	}
+	if specutils.DXGEnabled(info.spec, info.conf) {
+		log.Warningf("EXPERIMENTAL DXG proxy enabled: compatibility testing only; do not run untrusted workloads")
+		for _, dev := range info.spec.Linux.Devices {
+			if dev.Path == "/dev/dxg" {
+				if err := dxgproxy.Register(vfsObj, uint32(dev.Minor)); err != nil {
+					return fmt.Errorf("registering dxgproxy: %w", err)
+				}
+			}
+		}
 	}
 
 	if err := rdmaproxyRegisterDevices(info, vfsObj, rdmaSnapshot); err != nil {

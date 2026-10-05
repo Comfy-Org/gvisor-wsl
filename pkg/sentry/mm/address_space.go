@@ -32,6 +32,55 @@ func (mm *MemoryManager) AddressSpace() platform.AddressSpace {
 	return mm.as
 }
 
+// EnsurePlatformMapping validates ar and installs its pages in the platform AS.
+// This is needed before a process-bound device ioctl accesses application
+// memory: a host-kernel copy cannot invoke the Sentry's page-fault handler.
+func (mm *MemoryManager) EnsurePlatformMapping(ctx context.Context, ar hostarch.AddrRange, at hostarch.AccessType) error {
+	if ar.Length() == 0 {
+		return nil
+	}
+	end, ok := ar.End.RoundUp()
+	if !ok {
+		return linuxerr.EFAULT
+	}
+	ar.Start, ar.End = ar.Start.RoundDown(), end
+	mm.mappingMu.RLock()
+	defer mm.mappingMu.RUnlock()
+	vseg, _, err := mm.getVMAsLocked(ctx, ar, at, false)
+	if err != nil {
+		return err
+	}
+	mm.activeMu.Lock()
+	defer mm.activeMu.Unlock()
+	pseg, _, err := mm.getPMAsLocked(ctx, vseg, ar, at, true, false)
+	if err != nil {
+		return err
+	}
+	return mm.mapASLocked(ctx, pseg, ar, memmap.PlatformEffectPopulate)
+}
+
+// PlatformBufferRange returns the suffix of the readable/writable VMA containing
+// addr. Some device ABIs encode allocation sizes in opaque, driver-specific
+// data. An experimental caller can conservatively pin this entire range rather
+// than guessing that encoding. This is not a security check on a later ioctl:
+// the application can change its ioctl arguments or mappings after this call.
+func (mm *MemoryManager) PlatformBufferRange(addr hostarch.Addr, limit uint64) (hostarch.AddrRange, error) {
+	if !addr.IsPageAligned() {
+		return hostarch.AddrRange{}, linuxerr.EINVAL
+	}
+	mm.mappingMu.RLock()
+	defer mm.mappingMu.RUnlock()
+	vseg := mm.vmas.FindSegment(addr)
+	if !vseg.Ok() || !vseg.ValuePtr().effectivePerms.SupersetOf(hostarch.ReadWrite) {
+		return hostarch.AddrRange{}, linuxerr.EFAULT
+	}
+	ar := hostarch.AddrRange{Start: addr, End: vseg.End()}
+	if uint64(ar.Length()) > limit {
+		return hostarch.AddrRange{}, linuxerr.ENOMEM
+	}
+	return ar, nil
+}
+
 // mapASLocked maps addresses in ar into mm.as.
 //
 // Preconditions:
@@ -134,5 +183,22 @@ func (mm *MemoryManager) unmapASLocked(ar hostarch.AddrRange) {
 	// passed ranges that include addresses that can't be mapped by the
 	// application.
 	ar = ar.Intersect(mm.applicationAddrRange())
-	mm.as.Unmap(ar.Start, uint64(ar.Length()))
+	// Normal invalidations deliberately over-unmap gaps between PMAs. Device
+	// PFN mappings have no PMAs and cannot be recreated by MapFile; preserve
+	// them until their owner explicitly releases them.
+	for _, m := range mm.platformMappings {
+		if !m.ar.Overlaps(ar) {
+			continue
+		}
+		if ar.Start < m.ar.Start {
+			mm.as.Unmap(ar.Start, uint64(m.ar.Start-ar.Start))
+		}
+		ar.Start = m.ar.End
+		if ar.Start >= ar.End {
+			return
+		}
+	}
+	if ar.Length() != 0 {
+		mm.as.Unmap(ar.Start, uint64(ar.Length()))
+	}
 }

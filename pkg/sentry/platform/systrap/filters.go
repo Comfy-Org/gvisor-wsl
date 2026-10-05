@@ -29,7 +29,7 @@ import (
 const sysmsgThreadPriorityVarName = "systrap_sysmsg_thread_priority"
 
 // systrapSeccomp implements platform.SeccompInfo.
-type systrapSeccomp struct{}
+type systrapSeccomp struct{ dxg bool }
 
 // Variables implements `platform.SeccompInfo.Variables`.
 func (systrapSeccomp) Variables() precompiledseccomp.Values {
@@ -40,13 +40,16 @@ func (systrapSeccomp) Variables() precompiledseccomp.Values {
 }
 
 // ConfigKey implements `platform.SeccompInfo.ConfigKey`.
-func (systrapSeccomp) ConfigKey() string {
+func (s systrapSeccomp) ConfigKey() string {
+	if s.dxg {
+		return "systrap-dxg"
+	}
 	return "systrap"
 }
 
 // SyscallFilters implements `platform.SeccompInfo.SyscallFilters`.
-func (systrapSeccomp) SyscallFilters(vars precompiledseccomp.Values) seccomp.SyscallRules {
-	return seccomp.MakeSyscallRules(map[uintptr]seccomp.SyscallRule{
+func (s systrapSeccomp) SyscallFilters(vars precompiledseccomp.Values) seccomp.SyscallRules {
+	rules := seccomp.MakeSyscallRules(map[uintptr]seccomp.SyscallRule{
 		unix.SYS_PTRACE: seccomp.Or{
 			seccomp.PerArg{
 				seccomp.EqualTo(unix.PTRACE_ATTACH),
@@ -128,6 +131,10 @@ func (systrapSeccomp) SyscallFilters(vars precompiledseccomp.Values) seccomp.Sys
 			seccomp.EqualTo(vars.GetUint64(sysmsgThreadPriorityVarName)),
 		},
 	}).Merge(archSyscallFilters())
+	if s.dxg {
+		rules.Add(unix.SYS_SOCKETPAIR, seccomp.PerArg{seccomp.EqualTo(unix.AF_UNIX), seccomp.EqualTo(unix.SOCK_STREAM | unix.SOCK_CLOEXEC), seccomp.EqualTo(0)})
+	}
+	return rules
 }
 
 // HottestSyscalls implements `platform.SeccompInfo.HottestSyscalls`.
@@ -137,11 +144,11 @@ func (systrapSeccomp) HottestSyscalls() []uintptr {
 
 // SeccompInfo returns seccomp filter info for the systrap platform.
 func (p *Systrap) SeccompInfo() platform.SeccompInfo {
-	return systrapSeccomp{}
+	return systrapSeccomp{dxg: dxgEnabled}
 }
 
 // PrecompiledSeccompInfo implements
 // platform.Constructor.PrecompiledSeccompInfo.
 func (*constructor) PrecompiledSeccompInfo() []platform.SeccompInfo {
-	return []platform.SeccompInfo{(*Systrap)(nil).SeccompInfo()}
+	return []platform.SeccompInfo{systrapSeccomp{}, systrapSeccomp{dxg: true}}
 }

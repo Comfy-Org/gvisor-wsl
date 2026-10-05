@@ -127,6 +127,11 @@ type MemoryManager struct {
 	// mm_struct::page_table_lock.
 	activeMu activeRWMutex `state:"nosave"`
 
+	// platformMappings are device-owned mappings without memmap.File backing,
+	// sorted by address. Updates hold both mappingMu and activeMu; readers must
+	// hold at least one. These mappings make checkpointing unsupported.
+	platformMappings []*platformMapping `state:"nosave"`
+
 	// pmas stores platform mapping areas used to implement vmas. Since pmas
 	// are stored by value, clients should usually use pmaIterator.ValuePtr()
 	// instead of pmaIterator.Value() to get a pointer to the pma rather than

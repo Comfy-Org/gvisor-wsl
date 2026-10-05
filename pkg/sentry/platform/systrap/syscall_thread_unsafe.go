@@ -31,7 +31,12 @@ func (t *syscallThread) initRequestReplyAddresses(sentryStackAddr uintptr) {
 	atomic.StoreUint32(&sentryMessage.state, 0)
 
 	t.sentryMessage = sentryMessage
+	t.sentryMessage.dxgPath = [4]byte{'d', 'x', 'g', 0}
 	t.stubMessage = stubMessage
+}
+
+func (t *syscallThread) dxgPathAddr() uintptr {
+	return t.stubAddr + unsafe.Offsetof(syscallSentryMessage{}.dxgPath)
 }
 
 // maskAllSignals blocks all signals.

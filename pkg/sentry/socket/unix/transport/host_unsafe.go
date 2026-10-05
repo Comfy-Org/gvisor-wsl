@@ -78,7 +78,7 @@ func fdReadVec(fd int, bufs [][]byte, control []byte, peek bool, maxlen int64) (
 //
 // If the total length of bufs is > maxlen && truncate, fdWriteVec will do
 // a partial write and err will indicate why the message was truncated.
-func fdWriteVec(fd int, bufs [][]byte, maxlen int64, truncate bool, creds bool) (int64, int64, error) {
+func fdWriteVec(fd int, bufs [][]byte, maxlen int64, truncate bool, creds bool, rights []int) (int64, int64, error) {
 	length, iovecs, intermediate, err := buildIovec(bufs, maxlen, truncate)
 	if err != nil && len(iovecs) == 0 {
 		// No partial write to do, return error immediately.
@@ -96,6 +96,7 @@ func fdWriteVec(fd int, bufs [][]byte, maxlen int64, truncate bool, creds bool) 
 		msg.Iovlen = uint64(len(iovecs))
 	}
 
+	var control []byte
 	if creds {
 		// We can't pass arbitrary application credentials to the host. Pass the
 		// sentry's credentials instead.
@@ -122,8 +123,14 @@ func fdWriteVec(fd int, bufs [][]byte, maxlen int64, truncate bool, creds bool) 
 		}
 		*cmsgData = unix.Ucred{Pid: int32(pid), Uid: s.Uid, Gid: s.Gid}
 
-		msg.Control = &cmsgSlice[0]
-		msg.SetControllen(cmsgLen)
+		control = cmsgSlice
+	}
+	if len(rights) != 0 {
+		control = append(control, unix.UnixRights(rights...)...)
+	}
+	if len(control) != 0 {
+		msg.Control = &control[0]
+		msg.SetControllen(len(control))
 	}
 
 	n, _, e := unix.RawSyscall(unix.SYS_SENDMSG, uintptr(fd), uintptr(unsafe.Pointer(&msg)), unix.MSG_DONTWAIT|unix.MSG_NOSIGNAL)

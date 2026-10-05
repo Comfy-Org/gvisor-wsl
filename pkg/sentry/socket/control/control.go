@@ -677,6 +677,20 @@ type SCMRights interface {
 // +stateify savable
 type RightsFiles []*vfs.FileDescription
 
+// ExperimentalDXGHostFDs permits export of explicitly-created DXG IPC
+// capabilities only. It is not general host-backed FD passthrough.
+func (fs *RightsFiles) ExperimentalDXGHostFDs() ([]int, bool) {
+	fds := make([]int, 0, len(*fs))
+	for _, file := range *fs {
+		f, ok := file.Impl().(interface{ ExperimentalDXGHostFD() int })
+		if !ok {
+			return nil, false
+		}
+		fds = append(fds, f.ExperimentalDXGHostFD())
+	}
+	return fds, true
+}
+
 // NewSCMRights creates a new SCM_RIGHTS socket control message
 // representation using local sentry FDs.
 func NewSCMRights(t *kernel.Task, fds []primitive.Int32) (SCMRights, error) {

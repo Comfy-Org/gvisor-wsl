@@ -27,6 +27,10 @@ type syscallSentryMessage struct {
 	unused uint32
 	sysno  uint64
 	args   [6]uint64
+	// dxgPath is immutable after initialization and read-only in the stub.
+	dxgPath [4]byte
+	// Used only by a DXG helper's private syscallThread message.
+	dxgIPC [128]byte
 }
 
 // syscallStubMessage is a shared message that can be changed from a stub
@@ -35,5 +39,7 @@ type syscallSentryMessage struct {
 //
 // Attention: It can be compromised by user threads.
 type syscallStubMessage struct {
-	ret uint64
+	ret     uint64
+	dxgIPC  [128]byte
+	dxgArgs [128]byte
 }

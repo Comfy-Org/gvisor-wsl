@@ -127,6 +127,10 @@ var (
 	// been flipped for one Systrap instance, it will apply to all previously
 	// created and future instances too.
 	disableSyscallPatching bool
+
+	// dxgEnabled is immutable after stubInitialized. The global subprocess
+	// pool cannot mix stubs with different syscall allowlists.
+	dxgEnabled bool
 )
 
 // platformContext is an implementation of the platform context.
@@ -308,6 +312,7 @@ func New(opts platform.Options) (*Systrap, error) {
 
 	var stubErr error
 	stubInitialized.Do(func() {
+		dxgEnabled = opts.ExperimentalDXG
 		// Configure address space parameters for the current host's
 		// VA width. Must be called before any Context64 is created.
 		configureSystrapAddressSpace()
@@ -344,6 +349,10 @@ func New(opts platform.Options) (*Systrap, error) {
 	if stubErr != nil {
 		mf.Destroy()
 		return nil, stubErr
+	}
+	if dxgEnabled != opts.ExperimentalDXG {
+		mf.Destroy()
+		return nil, fmt.Errorf("cannot change experimental DXG mode after systrap initialization")
 	}
 
 	if !neverEnableFastPath {

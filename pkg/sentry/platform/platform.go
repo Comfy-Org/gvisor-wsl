@@ -401,6 +401,29 @@ type AddressSpace interface {
 	AddressSpaceIO
 }
 
+// DXGAddressSpace supports WSL's process-bound /dev/dxg interface. The device
+// must be opened and used in a process sharing the application's address space,
+// with a file descriptor table isolated from the Sentry.
+type DXGAddressSpace interface {
+	// DXGEnabled reports whether the experimental proxy was opted into.
+	DXGEnabled() bool
+	// OpenDXG opens "dxg" relative to a trusted, borrowed host /dev directory
+	// descriptor. The returned file must be closed before releasing this AS.
+	OpenDXG(dirFD int, flags uint32) (DXGFile, error)
+}
+
+// DXGFile is a /dev/dxg open file description owned by a platform helper.
+type DXGFile interface {
+	// Ioctl interprets arg in the application's address space.
+	Ioctl(request uint32, arg hostarch.Addr) (uintptr, error)
+	// IoctlFD transfers a resource FD through the helper's private table.
+	// ShareObjects returns an owned host FD; the other supported operations
+	// borrow hostFD for the duration of the ioctl. No raw Sentry FD is ever
+	// interpreted in an application's DXG argument.
+	IoctlFD(request uint32, params []byte, hostFD int) (uintptr, int, error)
+	Close()
+}
+
 // AddressSpaceIO supports IO through the memory mappings installed in an
 // AddressSpace.
 //
@@ -598,6 +621,11 @@ type Options struct {
 
 	// DisableFastPath, if true, completely disables the Systrap fast path.
 	DisableFastPath bool
+
+	// ExperimentalDXG enables systrap's process-bound WSL GPU helper. This
+	// widens the trusted stub filter; disabled instances retain the original
+	// filter. It cannot change after platform initialization.
+	ExperimentalDXG bool
 
 	// ApplicationCores is used by KVM to determine the correct amount of
 	// vCPUs to create.

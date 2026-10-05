@@ -136,6 +136,7 @@ go_library(
         "metadata.go",
         "metadata_mutex.go",
         "mm.go",
+        "platform_mapping.go",
         "pma.go",
         "pma_set.go",
         "procfs.go",
@@ -182,7 +183,10 @@ go_library(
 go_test(
     name = "mm_test",
     size = "small",
-    srcs = ["mm_test.go"],
+    srcs = [
+        "mm_test.go",
+        "platform_mapping_test.go",
+    ],
     library = ":mm",
     deps = [
         "//pkg/context",

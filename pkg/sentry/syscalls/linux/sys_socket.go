@@ -27,6 +27,7 @@ import (
 	"gvisor.dev/gvisor/pkg/marshal"
 	"gvisor.dev/gvisor/pkg/marshal/primitive"
 	"gvisor.dev/gvisor/pkg/sentry/arch"
+	"gvisor.dev/gvisor/pkg/sentry/devices/dxgproxy"
 	"gvisor.dev/gvisor/pkg/sentry/fsimpl/host"
 	"gvisor.dev/gvisor/pkg/sentry/kernel"
 	"gvisor.dev/gvisor/pkg/sentry/kernel/auth"
@@ -786,7 +787,10 @@ func fdsToHostFiles(ctx context.Context, fds []int) []*vfs.FileDescription {
 		}
 
 		// Create the file backed by hostFD.
-		file, err := host.NewFD(ctx, kernel.KernelFromContext(ctx).HostMount(), fd, &host.NewFDOptions{})
+		file, err := dxgproxy.ImportHostFD(ctx, fd)
+		if file == nil && err == nil {
+			file, err = host.NewFD(ctx, kernel.KernelFromContext(ctx).HostMount(), fd, &host.NewFDOptions{})
+		}
 		if err != nil {
 			ctx.Warningf("Error creating file from host FD: %v", err)
 			break

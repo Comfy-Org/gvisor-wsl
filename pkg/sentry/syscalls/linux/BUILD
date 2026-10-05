@@ -94,6 +94,7 @@ go_library(
         "//pkg/sentry/fsimpl/eventfd",
         "//pkg/sentry/fsimpl/fsconfigfd",
         "//pkg/sentry/fsimpl/host",
+        "//pkg/sentry/devices/dxgproxy",
         "//pkg/sentry/fsimpl/iouringfs",
         "//pkg/sentry/fsimpl/lock",
         "//pkg/sentry/fsimpl/mountfd",

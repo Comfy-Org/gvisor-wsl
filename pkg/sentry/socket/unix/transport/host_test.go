@@ -15,12 +15,93 @@
 package transport
 
 import (
+	"os"
 	"testing"
 
 	"golang.org/x/sys/unix"
+	"gvisor.dev/gvisor/pkg/context"
 	"gvisor.dev/gvisor/pkg/syserr"
 	"gvisor.dev/gvisor/pkg/waiter"
 )
+
+type dxgTestRights struct {
+	fd       int
+	releases int
+}
+
+func (r *dxgTestRights) Clone() RightsControlMessage           { return r }
+func (r *dxgTestRights) TransferRights() RightsControlMessage  { return r }
+func (r *dxgTestRights) Release(context.Context)               { r.releases++ }
+func (r *dxgTestRights) ExperimentalDXGHostFDs() ([]int, bool) { return []int{r.fd}, true }
+
+func TestDXGHostSenderConsumesRights(t *testing.T) {
+	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(pair[0])
+	defer unix.Close(pair[1])
+	sentinel, err := os.CreateTemp(t.TempDir(), "sentinel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sentinel.Close()
+	sender := &HostSender{fd: pair[0], stype: unix.SOCK_STREAM}
+	sender.sndbuf.Store(4096)
+	rights := &dxgTestRights{fd: int(sentinel.Fd())}
+	n, _, serr := sender.Send(nil, [][]byte{{1}}, ControlMessages{Rights: rights}, Address{})
+	if n != 1 || serr != nil || rights.releases != 1 {
+		t.Fatalf("send=%d,%v releases=%d", n, serr, rights.releases)
+	}
+	// The receive endpoint's deferred close drops the kernel's queued FD.
+}
+
+func TestDXGHostRightsWire(t *testing.T) {
+	pair, err := unix.Socketpair(unix.AF_UNIX, unix.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(pair[0])
+	defer unix.Close(pair[1])
+	sentinel, err := os.CreateTemp(t.TempDir(), "sentinel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sentinel.Close()
+	if _, err := sentinel.WriteString("gpu resource capability"); err != nil {
+		t.Fatal(err)
+	}
+	n, _, err := fdWriteVec(pair[0], [][]byte{{1}}, 1, false, false, []int{int(sentinel.Fd())})
+	if n != 1 || err != nil {
+		t.Fatalf("send = %d, %v", n, err)
+	}
+	buf, control := make([]byte, 1), make([]byte, unix.CmsgSpace(4))
+	_, nc, _, _, err := unix.Recvmsg(pair[1], buf, control, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := unix.ParseSocketControlMessage(control[:nc])
+	if err != nil || len(msgs) != 1 {
+		t.Fatalf("messages=%v, err=%v", msgs, err)
+	}
+	fds, err := unix.ParseUnixRights(&msgs[0])
+	if err != nil || len(fds) != 1 {
+		t.Fatalf("rights=%v, err=%v", fds, err)
+	}
+	defer unix.Close(fds[0])
+	data := make([]byte, 3)
+	if _, err := unix.Pread(fds[0], data, 0); err != nil || string(data) != "gpu" {
+		t.Fatalf("received wrong file: %q, %v", data, err)
+	}
+}
+
+func TestHostSenderRejectsOrdinaryRights(t *testing.T) {
+	sender := &HostSender{fd: -1}
+	_, _, err := sender.Send(nil, [][]byte{{1}}, ControlMessages{Rights: &SCMRights{}}, Address{})
+	if err != syserr.ErrInvalidEndpointState {
+		t.Fatalf("ordinary rights: %v", err)
+	}
+}
 
 // TestSCMSenderBeforeSaveIdempotent verifies that calling beforeSave
 // on an SCMSender whose host file descriptor is already closed (fd < 0)

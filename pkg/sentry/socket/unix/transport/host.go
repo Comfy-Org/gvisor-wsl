@@ -180,8 +180,16 @@ func (c *HostSender) Send(ctx context.Context, data [][]byte, controlMessages Co
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
+	var rights []int
 	if controlMessages.Rights != nil {
-		return 0, false, syserr.ErrInvalidEndpointState
+		provider, ok := controlMessages.Rights.(interface{ ExperimentalDXGHostFDs() ([]int, bool) })
+		if !ok {
+			return 0, false, syserr.ErrInvalidEndpointState
+		}
+		rights, ok = provider.ExperimentalDXGHostFDs()
+		if !ok {
+			return 0, false, syserr.ErrInvalidEndpointState
+		}
 	}
 
 	if c.IsSendClosed() {
@@ -192,7 +200,13 @@ func (c *HostSender) Send(ctx context.Context, data [][]byte, controlMessages Co
 	// only as much of the message as fits in the send buffer.
 	truncate := c.stype == linux.SOCK_STREAM
 
-	n, totalLen, err := fdWriteVec(c.fd, data, c.SendMaxQueueSize(), truncate, controlMessages.Credentials != nil)
+	n, totalLen, err := fdWriteVec(c.fd, data, c.SendMaxQueueSize(), truncate, controlMessages.Credentials != nil, rights)
+	if n > 0 && controlMessages.Rights != nil {
+		// As with queue.Enqueue, positive progress consumes the rights. The
+		// host kernel now owns its copies; there is no Sentry receive queue to
+		// release these references later. Include partial writes/EAGAIN.
+		controlMessages.Rights.Release(ctx)
+	}
 	if n < totalLen && err == nil {
 		// The host only returns a short write if it would otherwise
 		// block (and only for stream sockets).

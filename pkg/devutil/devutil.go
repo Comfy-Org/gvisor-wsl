@@ -72,6 +72,12 @@ func (g *GoferClient) ContainerName() string {
 	return g.contName
 }
 
+// HostDirFD returns a borrowed descriptor for the restricted /dev directory, or
+// -1 if the gofer did not donate one. The caller must not close it.
+func (g *GoferClient) HostDirFD() int {
+	return g.hostFD
+}
+
 // DirentNames returns names of all the dirents for /dev on the gofer.
 func (g *GoferClient) DirentNames(ctx context.Context) ([]string, error) {
 	if g.hostFD >= 0 {
